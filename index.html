@@ -1,0 +1,383 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Socket.IO chat</title>
+    <style>
+
+    .card { 
+      width:50px;
+      height:50px;
+    }
+     /* * { margin: 0; padding: 0; box-sizing: border-box; }
+      body { font: 13px Helvetica, Arial; }
+      form { background: #000; padding: 3px; position: fixed; bottom: 0; width: 100%; }
+      form input { border: 0; padding: 10px; width: 90%; margin-right: .5%; }
+      form button { width: 9%; background: rgb(130, 224, 255); border: none; padding: 10px; }
+      #messages { list-style-type: none; margin: 0; padding: 0; }
+      #messages li { padding: 5px 10px; }
+      #messages li:nth-child(odd) { background: #eee; }*/
+    </style>
+    <script type="text/javascript" src="constant.js"></script>
+  </head>
+  <body>
+    狼人杀!
+    <img src="WOLF.jpg" style="width:32px;height:32px;"/>
+    <div>
+      <form id='create' action="">
+        狼人<select id='WOLF'>
+            <option value=1>1</option>
+            <option value=2>2</option>
+            <option value=3>3</option>
+            <option value=4>4</option>
+            <option value=5>5</option>
+          </select>
+        白狼王<input type="checkbox" id="WHITE_WOLF"><br/>
+        预言家<input type="checkbox" id="SEER"  checked  readonly>
+        女巫<input type="checkbox" id="WITCH"    checked readonly>
+        猎人<input type="checkbox" id="HUNTER"   checked readonly>
+        守卫<input type="checkbox" id="SAVIOR">
+        白痴<input type="checkbox" id="IDIOT"><br/>
+        村民<select id='TOWNFOLK'>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+            <option value="7">7</option>
+          </select>
+        两姐妹<input type="checkbox" name="SISTER"><br/>
+        <button class='gameButton' id='createBtn'>Create</button>
+      </form>
+    </div>
+    <form id='join' action="">
+      房间号: <input id="roomIndex" autocomplete="off" />
+      玩家号: <input id="playerIndex" autocomplete="off" />
+      <button class='gameButton' id='joinBtn'>Join</button>
+    </form>
+    <form id='start' action="">
+      <button id='startBtn' disabled>开始游戏</button>
+    </form>
+    <form id='next' action="">
+      <button id='nextBtn' disabled>下一步</button>
+    </form>
+    <form id='wolf' action="">
+      <button id='killBtn' disabled>杀</button>
+    </form>
+
+    <div>
+      <form id='witch1' action="">
+        <button id='witchKillBtn' name='witch' value='kill' disabled>毒</button>
+      </form>
+      <form id='witch2' action="">
+        <button id='witchSaveBtn' name='witch' value='save' disabled>救</button> 
+      </form>
+      <form id='witch3' action="">
+        <button id='witchSkipBtn' name='witch' value='skip' disabled>过</button> 
+      </form>
+    </div>
+
+    <form id='seer' action="">
+      <button id='seerBtn' disabled>查验</button>
+    </form>
+
+
+    <form id='savior1' action="">
+      <button id='saviorBtn' disabled>守卫</button>
+    </form>
+    <form id='savior2' action="">
+      <button id='saviorSkipBtn' disabled>过</button> 
+    </form>
+    <form id='report' action="">
+      <button id='reportBtn'>举报</button> 
+    </form>
+    <form id='resend' action="">
+      <button id='resendBtn' disabled>重新发送</button> 
+    </form>
+
+
+
+    <ul id="gameinfo"></ul>
+    <script src="https://cdn.socket.io/socket.io-1.2.0.js"></script>
+    <script src="http://code.jquery.com/jquery-1.11.1.js"></script>
+    <script>
+      var socket = io();
+      var gameIndex = -1;
+      var playerIndex = -1;
+      var gameConfig;
+      // Create game room.
+      $('#create').submit(function(){
+        var createMsg = {};
+        createMsg[Game.WOLF] = parseInt($('#WOLF').find(":selected").val());
+        createMsg[Game.TOWNFOLK] = parseInt($('#TOWNFOLK').find(":selected").val());
+        characters = [Game.WHITE_WOLF, Game.SEER, Game.WITCH, Game.HUNTER, Game.SAVIOR, Game.IDIOT];
+        for (var i = 0; i < characters.length; ++i) {
+          checkCharacter(characters[i], createMsg);
+        }
+        socket.emit(Message.CREATE, createMsg);
+        return false;
+      });
+
+      // Join a game room.
+      $('#join').submit(function(){
+        var roomIndex = $('#roomIndex').val();
+        if (!isPositiveInt(roomIndex)) {
+          message("房间号无效. 房间号应为 >= 1 的整数");
+          return false;
+        }
+        var playerIndex = $('#playerIndex').val();
+         if (!isPositiveInt(playerIndex)) {
+          message("玩家号无效. 玩家号应为 >= 1 的整数");
+          return false;
+        }
+        var joinMsg = {};
+        joinMsg[Message.ROOMID] = parseInt(roomIndex);
+        joinMsg[Message.PLAYERINDEX] = parseInt(playerIndex);
+        socket.emit(Message.JOIN, joinMsg);
+        return false;
+      });
+
+      // Start the game.
+      $('#start').submit(function(){
+        socket.emit(Message.START, gameIndex);
+        return false;
+      });
+
+       $('#next').submit(function(){
+        socket.emit(Message.NEXT, gameIndex);
+        $('#nextBtn').prop("disabled", true);
+        return false;
+      });
+
+      $('#report').submit(function() {
+        if (gameIndex != -1) {
+          socket.emit(Message.REPORT, gameIndex);
+          message("已举报. 请等待房主操作.");
+        }
+        return false;
+      });
+
+      $('#resend').submit(function() {
+        if (gameIndex != -1) {
+          socket.emit(Message.RESEND, gameIndex);
+          message("已重新发送.");
+        }
+        return false;
+      });
+
+      // Wolf kill.
+      $('#wolf').submit(function() {
+        killMsg = {}
+        killMsg[Game.KILL] = parseInt($('#wolfKill').find(":selected").val());
+        killMsg[Game.INDEX] = gameIndex;
+        socket.emit(Message.WOLF_ROUND, killMsg);
+        return false;
+      });
+
+      $('#witch1').submit(function(){
+        $('#witchSaveBtn').prop("disabled", true);
+        $('#witchKillBtn').prop("disabled", true);
+        $('#witchSkipBtn').prop("disabled", true);
+        witchMsg = {}
+        witchMsg[Game.INDEX] = gameIndex;
+        witchMsg[Game.WITCH_KILL] = parseInt($('#witchKill').find(":selected").val());
+        message('毒死 ' + witchMsg[Game.WITCH_KILL] + ' 号玩家');
+        socket.emit(Message.WITCH_ROUND, witchMsg);
+        return false;
+      });
+
+      $('#witch2').submit(function(){
+        $('#witchSaveBtn').prop("disabled", true);
+        $('#witchKillBtn').prop("disabled", true);
+        $('#witchSkipBtn').prop("disabled", true);
+        witchMsg = {}
+        witchMsg[Game.INDEX] = gameIndex;
+        witchMsg[Game.WITCH_SAVE] = true;
+        message('救 ' + witchMsg[Game.WITCH_SAVE] + ' 号玩家');
+        socket.emit(Message.WITCH_ROUND, witchMsg);
+        return false;
+      });
+
+      $('#witch3').submit(function(){
+        $('#witchSaveBtn').prop("disabled", true);
+        $('#witchKillBtn').prop("disabled", true);
+        $('#witchSkipBtn').prop("disabled", true);
+        witchMsg = {}
+        witchMsg[Game.INDEX] = gameIndex;
+        socket.emit(Message.WITCH_ROUND, witchMsg);
+        message('女巫不行动');
+        return false;开始
+      });
+
+      $('#seer').submit(function(){
+        $('#seerBtn').prop("disabled", true);
+        var i = parseInt($('#seerCheck').find(":selected").val());
+        var char = gameConfig[i - 1];
+        if (char == Game.WOLF || char == Game.WHITE_WOLF) {
+           message(i + '号玩家的身份是: 狼人');
+        } else {
+          message(i + '号玩家的身份是: 好人');
+        }
+        socket.emit(Message.SEER_ROUND, gameIndex);
+        return false;
+      });
+
+       $('#savior1').submit(function(){
+        $('#saviorBtn').prop("disabled", true);
+        $('#saviorSkipBtn').prop("disabled", true);
+        var i = parseInt($('#saviorSave').find(":selected").val());
+        message('选择守护 ' + i + '号玩家');
+        saviorMsg = {}
+        saviorMsg[Game.INDEX] = gameIndex;
+        saviorMsg[Game.SAVIOR_SAVE] = i;
+        socket.emit(Message.SAVIOR_ROUND, saviorMsg);
+        return false;
+      });
+
+      $('#savior2').submit(function(){
+        $('#saviorBtn').prop("disabled", true);
+        $('#saviorSkipBtn').prop("disabled", true);
+        saviorMsg = {}
+        saviorMsg[Game.INDEX] = gameIndex;
+        socket.emit(Message.SAVIOR_ROUND, saviorMsg);
+        return false;
+      });
+
+      // Receiving.
+      socket.on(Message.CREATE, function(msg) {
+        $('#gameButton').prop("disabled", true);
+        $('#resendBtn').prop("disabled", false);
+        gameIndex = msg[Message.INDEX];
+        playerIndex = msg[Message.PLAYERINDEX];
+        message('创建房间成功. 房间号为: ' +  msg[Message.INDEX] + '. 你的座位号为: ' + playerIndex);
+        createDropList('wolf', 'wolfKill', msg[Message.SIZE]);
+        createDropList('witch1', 'witchKill', msg[Message.SIZE]);
+        createDropList('seer', 'seerCheck', msg[Message.SIZE]);
+        createDropList('savior1', 'saviorSave', msg[Message.SIZE]);
+      });
+      socket.on(Message.JOIN, function(msg) {
+        $('.gameButton').prop("disabled", true);
+        gameIndex = msg[Message.INDEX];
+        playerIndex = msg[Message.PLAYERINDEX];
+        message('加入成功房间' + msg[Message.INDEX] + '. 你的座位号为: ' + playerIndex + '. 等待其他玩家加入...');
+        createDropList('wolf', 'wolfKill', msg[Message.SIZE]);
+        createDropList('witch1', 'witchKill', msg[Message.SIZE]);
+        createDropList('seer', 'seerCheck', msg[Message.SIZE]);
+        createDropList('savior1', 'saviorSave', msg[Message.SIZE]);
+      });
+      socket.on(Message.READY, function(msg) {
+        message('人已经齐咯！！ 请准备开始！！！');
+        $('#startBtn').prop("disabled", false);
+      });
+      socket.on(Message.START, function(msg) {
+        $('#startBtn').prop("disabled", true);
+        message('房间' + gameIndex + '开始游戏.....');
+        message('你的身份是: ' + characterToChinese(msg[Message.CHARACTER]));
+        addImage(msg[Message.CHARACTER]);
+
+        if (msg[Message.CHARACTER] == Game.WOLF) {
+          message('狼人请选择击杀目标, 并由头狼指定');
+          if (Message.EXTRA in msg) {
+            message('头狼，请输入击杀目标');
+            $('#killBtn').prop("disabled", false);
+          }
+        }
+      });
+      socket.on(Message.NEXT, function(msg) {
+        $('#nextBtn').prop("disabled", !msg[Message.ENABLE_HOST]);
+        message(msg[Message.INFO]);
+      });
+
+      socket.on(Message.WOLF_ROUND, function(msg) {
+        $('#killBtn').prop("disabled", true);
+        message('狼队杀害目标: ' + msg + '号玩家');
+      });
+      socket.on(Message.WITCH_ROUND, function(killedIndex) {
+        if (killedIndex != playerIndex) {
+          $('#witchSaveBtn').prop("disabled", false);
+        }
+        $('#witchKillBtn').prop("disabled", false);
+        $('#witchSkipBtn').prop("disabled", false);
+        message('女巫. 今晚死的人是 ' + killedIndex + '号玩家. 请选择救人或者毒死一个玩家.');
+      });
+      socket.on(Message.SEER_ROUND, function(config) {
+        $('#seerBtn').prop("disabled", false);
+        message('预言家. 今天晚上你要验谁的身份？');
+        gameConfig = config;
+      });
+      socket.on(Message.SAVIOR_ROUND, function() {
+        $('#saviorBtn').prop("disabled", false);
+        $('#saviorSkipBtn').prop("disabled", false);
+        message('守卫. 请指定守护玩家');
+      });
+      socket.on(Message.HUNTER_ROUND, function(good) {
+        var hunter = good ? '可以发动' : '不可发动';
+        message('猎人. 你的技能状态是: ' + hunter);
+      });
+      socket.on(Message.ROUND_END, function(msg) {
+        if (msg.length == 0) {
+          message('昨天晚上是: 平安夜');
+        } else {
+          message('倒牌不分先后. 昨晚死亡的是: ' + msg);
+        }
+      });
+
+      socket.on(Message.ERROR, function(msg) {
+        message(msg);
+      });
+      socket.on(Message.INFO, function(msg) {
+        message(msg);
+      });
+
+      function characterToChinese(char) {
+        if (char == Game.WOLF) {
+          return '狼人';
+        } else if (char == Game.SEER) {
+          return '预言家';
+        } else if (char == Game.WITCH) {
+          return '女巫';
+        } else if (char == Game.HUNTER) {
+          return '猎人';
+        } else if (char == Game.SAVIOR) {
+          return '守卫';
+        } else if (char == Game.IDIOT) {
+          return '白痴';
+        } else if (char == Game.TOWNFOLK) {
+          return '普通村民';
+        } else if (char == Game.WHITE_WOLF) {
+          return '白狼王';
+        } else if (char == Game.SISTER) {
+          return '两姐妹';
+        } else {
+          return '未知';
+        }
+      }
+
+      function checkCharacter(name, createMsg) {
+        if ($('#' + name).is(':checked')) {
+          createMsg[name] = 1;
+        }
+      }
+
+      function isPositiveInt(str) {
+        var n = ~~Number(str);
+        return String(n) === str && n > 0;
+      }
+
+      function message(str) {
+        $('#gameinfo').append($('<li>').text(str));
+      }
+
+      function addImage(name) {
+        $('#gameinfo').append($('<img>',{src: name + '.jpg', class:'card'}));
+      }
+
+      function createDropList(name, subname, size) {
+        var sel = $("<select id='" + subname + "'>").appendTo('#' + name);
+        for (var i = 1; i <= size; ++i) {
+            sel.append($("<option>").attr('value', i).text(i));
+        }
+      }
+    </script>
+  </body>
+</html>
