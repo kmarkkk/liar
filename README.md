@@ -1,3 +1,4 @@
-# Wolf Kill
+# 天黑请闭眼
 
-LOL
+  node index.js
+  http://localhost:3000  
